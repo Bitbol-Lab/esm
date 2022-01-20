@@ -93,6 +93,7 @@ class EmbeddingMul(nn.Module):
 
         with torch.set_grad_enabled(self.requires_grad):
             result = torch.matmul(input, self.weight)
+            
         return result
 
     def __repr__(self):
