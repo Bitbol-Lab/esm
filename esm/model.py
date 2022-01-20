@@ -30,11 +30,11 @@ class EmbeddingMul(nn.Module):
     but only with values that have no effects, i.e set to False, None or -1.
     """
 
-    def __init__(self, alphabet_size):
+    def __init__(self, alphabet_size, embed_dim):
         super(EmbeddingMul, self).__init__()
         # i.e the dictionary size
         self.alphabet_size = alphabet_size
-        self.ones = torch.eye(alphabet_size, requires_grad=False)
+        self.weight = nn.Parameter(torch.randn(alphabet_size, embed_dim))
         self._requires_grad = False
 
     @property
@@ -342,7 +342,7 @@ class MSATransformer(nn.Module):
         self.embed_tokens = nn.Embedding(
             self.alphabet_size, self.args.embed_dim, padding_idx=self.padding_idx
         )
-        self.embed_tokens_oh = EmbeddingMul(self.alphabet_size)
+        self.embed_tokens_oh = EmbeddingMul(self.alphabet_size, self.args.embed_dim)
 
         if getattr(self.args, "embed_positions_msa", False):
             emb_dim = getattr(self.args, "embed_positions_msa_dim", self.args.embed_dim)
