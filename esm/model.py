@@ -330,36 +330,33 @@ class MSATransformer(nn.Module):
             weight=self.embed_tokens.weight,
         )
 
-    def forward(self, tokens, repr_layers=[], need_head_weights=False, return_contacts=False):
+    def forward(self, tokens_oh, repr_layers=[], need_head_weights=False, return_contacts=False):
         if return_contacts:
             need_head_weights = True
 
-        assert tokens.ndim == 4, "One-hot encodings required"
-        batch_size, num_alignments, seqlen , _ = tokens.size()
-        # FIXME (padding index, not present in our tests?)
-        padding_mask = None
-#         padding_mask = tokens.eq(self.padding_idx)  # B, R, C
-#         if not padding_mask.any():
-#             padding_mask = None
+        assert tokens_oh.ndim == 4, "One-hot encodings required"
+        batch_size, num_alignments, seqlen , _ = tokens_oh.size()
+        tokens = torch.argmax(tokens_oh, dim=-1)
+        padding_mask = tokens.eq(self.padding_idx)  # B, R, C
+        if not padding_mask.any():
+            padding_mask = None
 
-        x = self.embed_tokens_oh(tokens)
-        # FIXME (positional embeddings)
-#         x += self.embed_positions(tokens.view(batch_size * num_alignments, seqlen)).view(x.size())
-#         if self.msa_position_embedding is not None:
-#             if x.size(1) > 1024:
-#                 raise RuntimeError(
-#                     "Using model with MSA position embedding trained on maximum MSA "
-#                     f"depth of 1024, but received {x.size(1)} alignments."
-#                 )
-#             x += self.msa_position_embedding[:, :num_alignments]
+        x = self.embed_tokens_oh(tokens_oh)
+        x += self.embed_positions(tokens.view(batch_size * num_alignments, seqlen)).view(x.size())
+        if self.msa_position_embedding is not None:
+            if x.size(1) > 1024:
+                raise RuntimeError(
+                    "Using model with MSA position embedding trained on maximum MSA "
+                    f"depth of 1024, but received {x.size(1)} alignments."
+                )
+            x += self.msa_position_embedding[:, :num_alignments]
 
         x = self.emb_layer_norm_before(x)
 
         x = self.dropout_module(x)
 
-        # FIXME
-#         if padding_mask is not None:
-#             x = x * (1 - padding_mask.unsqueeze(-1).type_as(x))
+        if padding_mask is not None:
+            x = x * (1 - padding_mask.unsqueeze(-1).type_as(x))
 
         repr_layers = set(repr_layers)
         hidden_representations = {}
