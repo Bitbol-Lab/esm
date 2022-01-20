@@ -72,10 +72,7 @@ class EmbeddingMul(nn.Module):
         # ____________________________________________________________________
 
         with torch.set_grad_enabled(self.requires_grad):
-            result = torch.stack(
-                [torch.stack(
-                    [torch.mm(row.float(), self.weight) for row in msa], dim=0) 
-                     for msa in input], dim=0)
+            result = torch.matmul(input, self.weight)
         return result
 
     def __repr__(self):
