@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .modules import (
+    EmbeddingMul,
     TransformerLayer,
     AxialTransformerLayer,
     LearnedPositionalEmbedding,
@@ -20,63 +21,6 @@ from .modules import (
 )
 
 from .axial_attention import RowSelfAttention, ColumnSelfAttention
-
-
-class EmbeddingMul(nn.Module):
-    """This class implements a custom embedding mudule which uses matrix
-    multiplication instead of a lookup. The method works in the functional
-    way.
-    Note: this class accepts the arguments from the original pytorch module
-    but only with values that have no effects, i.e set to False, None or -1.
-    """
-
-    def __init__(self, alphabet_size, embed_dim):
-        super(EmbeddingMul, self).__init__()
-        # i.e the dictionary size
-        self.alphabet_size = alphabet_size
-        self.weight = nn.Parameter(torch.randn(alphabet_size, embed_dim))
-        self._requires_grad = False
-
-    @property
-    def requires_grad(self):
-        return self._requires_grad
-
-    @requires_grad.setter
-    def requires_grad(self, value):
-        self._requires_grad = value
-        logger.info(
-            f"(embedding mul) requires_grad set to {self.requires_grad}. ")
-
-    def forward(self, input, padding_idx=-1, max_norm=None,
-                norm_type=2., scale_grad_by_freq=False, sparse=False):
-        """Declares the same arguments as the original pytorch implementation
-        but only for backward compatibility. Their values must be set to have
-        no effects.
-        Args:
-            - input: of shape (bptt, bsize)
-        Returns:
-            - result: of shape (bptt, bsize, dict_size)
-        """
-        # ____________________________________________________________________
-        # Checks if unsupported argument are used
-        if padding_idx != -1:
-            raise NotImplementedError(
-                f"padding_idx must be -1, not {padding_idx}")
-        if max_norm is not None:
-            raise NotImplementedError(f"max_norm must be None, not {max_norm}")
-        if scale_grad_by_freq:
-            raise NotImplementedError(f"scale_grad_by_freq must be False, "
-                                      f"not {scale_grad_by_freq}")
-        if sparse:
-            raise NotImplementedError(f"sparse must be False, not {sparse}")
-        # ____________________________________________________________________
-
-        with torch.set_grad_enabled(self.requires_grad):
-            result = torch.matmul(input, self.weight)
-        return result
-
-    def __repr__(self):
-        return self.__class__.__name__ + "({})".format(self.alphabet_size)
 
 
 class ProteinBertModel(nn.Module):
