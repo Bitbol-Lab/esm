@@ -22,6 +22,65 @@ from .modules import (
 from .axial_attention import RowSelfAttention, ColumnSelfAttention
 
 
+class EmbeddingMul(nn.Module):
+    """This class implements a custom embedding mudule which uses matrix
+    multiplication instead of a lookup. The method works in the functional
+    way.
+    Note: this class accepts the arguments from the original pytorch module
+    but only with values that have no effects, i.e set to False, None or -1.
+    """
+
+    def __init__(self, alphabet_size):
+        super(EmbeddingMul, self).__init__()
+        # i.e the dictionary size
+        self.alphabet_size = alphabet_size
+        self.ones = torch.eye(alphabet_size, requires_grad=False)
+        self._requires_grad = False
+
+    @property
+    def requires_grad(self):
+        return self._requires_grad
+
+    @requires_grad.setter
+    def requires_grad(self, value):
+        self._requires_grad = value
+        logger.info(
+            f"(embedding mul) requires_grad set to {self.requires_grad}. ")
+
+    def forward(self, input, padding_idx=-1, max_norm=None,
+                norm_type=2., scale_grad_by_freq=False, sparse=False):
+        """Declares the same arguments as the original pytorch implementation
+        but only for backward compatibility. Their values must be set to have
+        no effects.
+        Args:
+            - input: of shape (bptt, bsize)
+        Returns:
+            - result: of shape (bptt, bsize, dict_size)
+        """
+        # ____________________________________________________________________
+        # Checks if unsupported argument are used
+        if padding_idx != -1:
+            raise NotImplementedError(
+                f"padding_idx must be -1, not {padding_idx}")
+        if max_norm is not None:
+            raise NotImplementedError(f"max_norm must be None, not {max_norm}")
+        if scale_grad_by_freq:
+            raise NotImplementedError(f"scale_grad_by_freq must be False, "
+                                      f"not {scale_grad_by_freq}")
+        if sparse:
+            raise NotImplementedError(f"sparse must be False, not {sparse}")
+        # ____________________________________________________________________
+
+        with torch.set_grad_enabled(self.requires_grad):
+            result = torch.stack(
+                [torch.mm(row.float(), self.weight)
+                 for msa in input for row in msa], dim=0)
+        return result
+
+    def __repr__(self):
+        return self.__class__.__name__ + "({})".format(self.alphabet_size)
+
+
 class ProteinBertModel(nn.Module):
     @classmethod
     def add_args(cls, parser):
@@ -283,6 +342,7 @@ class MSATransformer(nn.Module):
         self.embed_tokens = nn.Embedding(
             self.alphabet_size, self.args.embed_dim, padding_idx=self.padding_idx
         )
+        self.embed_tokens_oh = EmbeddingMul(self.alphabet_size)
 
         if getattr(self.args, "embed_positions_msa", False):
             emb_dim = getattr(self.args, "embed_positions_msa_dim", self.args.embed_dim)
@@ -332,28 +392,32 @@ class MSATransformer(nn.Module):
         if return_contacts:
             need_head_weights = True
 
-        assert tokens.ndim == 3
-        batch_size, num_alignments, seqlen = tokens.size()
-        padding_mask = tokens.eq(self.padding_idx)  # B, R, C
-        if not padding_mask.any():
-            padding_mask = None
+        assert tokens.ndim == 4, "One-hot encodings required"
+        batch_size, num_alignments, seqlen , _ = tokens.size()
+        # FIXME (padding index, not present in our tests?)
+        padding_mask = None
+#         padding_mask = tokens.eq(self.padding_idx)  # B, R, C
+#         if not padding_mask.any():
+#             padding_mask = None
 
-        x = self.embed_tokens(tokens)
-        x += self.embed_positions(tokens.view(batch_size * num_alignments, seqlen)).view(x.size())
-        if self.msa_position_embedding is not None:
-            if x.size(1) > 1024:
-                raise RuntimeError(
-                    "Using model with MSA position embedding trained on maximum MSA "
-                    f"depth of 1024, but received {x.size(1)} alignments."
-                )
-            x += self.msa_position_embedding[:, :num_alignments]
+        x = self.embed_tokens_oh(tokens)
+        # FIXME (positional embeddings)
+#         x += self.embed_positions(tokens.view(batch_size * num_alignments, seqlen)).view(x.size())
+#         if self.msa_position_embedding is not None:
+#             if x.size(1) > 1024:
+#                 raise RuntimeError(
+#                     "Using model with MSA position embedding trained on maximum MSA "
+#                     f"depth of 1024, but received {x.size(1)} alignments."
+#                 )
+#             x += self.msa_position_embedding[:, :num_alignments]
 
         x = self.emb_layer_norm_before(x)
 
         x = self.dropout_module(x)
 
-        if padding_mask is not None:
-            x = x * (1 - padding_mask.unsqueeze(-1).type_as(x))
+        # FIXME
+#         if padding_mask is not None:
+#             x = x * (1 - padding_mask.unsqueeze(-1).type_as(x))
 
         repr_layers = set(repr_layers)
         hidden_representations = {}
