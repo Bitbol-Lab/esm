@@ -112,6 +112,7 @@ def load_model_and_alphabet_core(model_data, regression_data=None):
         prs3 = lambda s: s.replace("row", "column") if "row" in s else s.replace("column", "row")
         model_args = {pra(arg[0]): arg[1] for arg in vars(model_data["args"]).items()}
         model_state = {prs1(prs2(prs3(arg[0]))): arg[1] for arg in model_data["model"].items()}
+        model_state["embed_tokens_oh.weight"] = model_state["embed_tokens.weight"]
         if model_args.get("embed_positions_msa", False):
             emb_dim = model_state["msa_position_embedding"].size(-1)
             model_args["embed_positions_msa_dim"] = emb_dim  # initial release, bug: emb_dim==1
