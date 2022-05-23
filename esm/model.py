@@ -330,7 +330,10 @@ class MSATransformer(nn.Module):
             weight=self.embed_tokens.weight,
         )
 
-    def forward(self, tokens_oh, repr_layers=[], need_head_weights=False, return_contacts=False):
+    def forward(
+        self, tokens_oh, repr_layers=[], need_head_weights=False, return_contacts=False,
+        offset_pos_emb_from=None, offset_pos_emb_by=200
+    ):
         if return_contacts:
             need_head_weights = True
 
@@ -342,7 +345,10 @@ class MSATransformer(nn.Module):
             padding_mask = None
 
         x = self.embed_tokens_oh(tokens_oh)
-        x += self.embed_positions(tokens.view(batch_size * num_alignments, seqlen)).view(x.size())
+        x += self.embed_positions(
+            tokens.view(batch_size * num_alignments, seqlen), offset_from=offset_pos_emb_from,
+            offset_by=offset_pos_emb_by
+        ).view(x.size())
         if self.msa_position_embedding is not None:
             if x.size(1) > 1024:
                 raise RuntimeError(
