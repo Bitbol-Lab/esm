@@ -174,8 +174,8 @@ def _load_model_and_alphabet_core_v2(model_data):
 
     cfg = model_data["cfg"]["model"]
     state_dict = model_data["model"]
-    state_dict["embed_tokens_oh.weight"] = state_dict["embed_tokens.weight"]
     state_dict = upgrade_state_dict(state_dict)
+    state_dict["embed_tokens_oh.weight"] = state_dict["embed_tokens.weight"]
     alphabet = esm.data.Alphabet.from_architecture("ESM-1b")
     model = ESM2(
         num_layers=cfg.encoder_layers,
