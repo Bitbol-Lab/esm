@@ -79,7 +79,7 @@ class ESM2(nn.Module):
         if return_contacts:
             need_head_weights = True
 
-        assert tokens_oh.ndim == 4, "One-hot encodings required"
+        assert tokens_oh.ndim == 3, "One-hot encodings required"
         tokens = torch.argmax(tokens_oh, dim=-1)
         padding_mask = tokens.eq(self.padding_idx)  # B, T
 
