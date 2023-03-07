@@ -3,12 +3,16 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from argparse import Namespace
-import warnings
+import re
 import urllib
+import warnings
+from argparse import Namespace
 from pathlib import Path
+
 import torch
+
 import esm
+from esm.model.esm2 import ESM2
 
 
 def _has_regression_weights(model_name):
@@ -45,18 +49,23 @@ def load_regression_hub(model_name):
     return regression_data
 
 
-def load_model_and_alphabet_hub(model_name):
+def _download_model_and_regression_data(model_name):
     url = f"https://dl.fbaipublicfiles.com/fair-esm/models/{model_name}.pt"
     model_data = load_hub_workaround(url)
     if _has_regression_weights(model_name):
         regression_data = load_regression_hub(model_name)
     else:
         regression_data = None
-    return load_model_and_alphabet_core(model_data, regression_data)
+    return model_data, regression_data
+
+
+def load_model_and_alphabet_hub(model_name):
+    model_data, regression_data = _download_model_and_regression_data(model_name)
+    return load_model_and_alphabet_core(model_name, model_data, regression_data)
 
 
 def load_model_and_alphabet_local(model_location):
-    """ Load from local path. The regression weights need to be co-located """
+    """Load from local path. The regression weights need to be co-located"""
     model_location = Path(model_location)
     model_data = torch.load(str(model_location), map_location="cpu")
     model_name = model_location.stem
@@ -65,18 +74,16 @@ def load_model_and_alphabet_local(model_location):
         regression_data = torch.load(regression_location, map_location="cpu")
     else:
         regression_data = None
-    return load_model_and_alphabet_core(model_data, regression_data)
+    return load_model_and_alphabet_core(model_name, model_data, regression_data)
 
 
 def has_emb_layer_norm_before(model_state):
-    """ Determine whether layer norm needs to be applied before the encoder """
+    """Determine whether layer norm needs to be applied before the encoder"""
     return any(k.startswith("emb_layer_norm_before") for k, param in model_state.items())
 
 
-def load_model_and_alphabet_core(model_data, regression_data=None):
-    import esm  # conditional esm.inverse_folding below
-    if regression_data is not None:
-        model_data["model"].update(regression_data["model"])
+def _load_model_and_alphabet_core_v1(model_data):
+    import esm  # since esm.inverse_folding is imported below, you actually have to re-import esm here
 
     alphabet = esm.Alphabet.from_architecture(model_data["args"].arch)
 
@@ -121,8 +128,9 @@ def load_model_and_alphabet_core(model_data, regression_data=None):
 
     elif "invariant_gvp" in model_data["args"].arch:
         import esm.inverse_folding
-        model_type = esm.inverse_folding.gvp_transformer.GVPTransformerModel 
-        model_args = vars(model_data["args"]) # convert Namespace -> dict
+
+        model_type = esm.inverse_folding.gvp_transformer.GVPTransformerModel
+        model_args = vars(model_data["args"])  # convert Namespace -> dict
 
         def update_name(s):
             # Map the module names in checkpoints trained with internal code to
@@ -134,13 +142,12 @@ def load_model_and_alphabet_core(model_data, regression_data=None):
             s = s.replace("seq_logits_projection.", "")
             s = s.replace("embed_ingraham_features", "embed_dihedrals")
             s = s.replace("embed_gvp_in_local_frame.0", "embed_gvp_output")
-            s = s.replace("embed_features_in_local_frame.0",
-            "embed_gvp_input_features")
+            s = s.replace("embed_features_in_local_frame.0", "embed_gvp_input_features")
             return s
 
         model_state = {
-            update_name(sname): svalue for sname, svalue in
-            model_data["model"].items()
+            update_name(sname): svalue
+            for sname, svalue in model_data["model"].items()
             if "version" not in sname
         }
 
@@ -151,6 +158,40 @@ def load_model_and_alphabet_core(model_data, regression_data=None):
         Namespace(**model_args),
         alphabet,
     )
+
+    return model, alphabet, model_state
+
+
+def _load_model_and_alphabet_core_v2(model_data):
+    def upgrade_state_dict(state_dict):
+        """Removes prefixes 'model.encoder.sentence_encoder.' and 'model.encoder.'."""
+        prefixes = ["encoder.sentence_encoder.", "encoder."]
+        pattern = re.compile("^" + "|".join(prefixes))
+        state_dict = {pattern.sub("", name): param for name, param in state_dict.items()}
+        return state_dict
+
+    cfg = model_data["cfg"]["model"]
+    state_dict = model_data["model"]
+    state_dict = upgrade_state_dict(state_dict)
+    alphabet = esm.data.Alphabet.from_architecture("ESM-1b")
+    model = ESM2(
+        num_layers=cfg.encoder_layers,
+        embed_dim=cfg.encoder_embed_dim,
+        attention_heads=cfg.encoder_attention_heads,
+        alphabet=alphabet,
+        token_dropout=cfg.token_dropout,
+    )
+    return model, alphabet, state_dict
+
+
+def load_model_and_alphabet_core(model_name, model_data, regression_data=None):
+    if regression_data is not None:
+        model_data["model"].update(regression_data["model"])
+
+    if model_name.startswith("esm2"):
+        model, alphabet, model_state = _load_model_and_alphabet_core_v2(model_data)
+    else:
+        model, alphabet, model_state = _load_model_and_alphabet_core_v1(model_data)
 
     expected_keys = set(model.state_dict().keys())
     found_keys = set(model_state.keys())
@@ -305,3 +346,76 @@ def esm_if1_gvp4_t16_142M_UR50():
     Returns a tuple of (Model, Alphabet).
     """
     return load_model_and_alphabet_hub("esm_if1_gvp4_t16_142M_UR50")
+
+
+def esm2_t6_8M_UR50D():
+    """6 layer ESM-2 model with 8M params, trained on UniRef50.
+
+    Returns a tuple of (Model, Alphabet).
+    """
+    return load_model_and_alphabet_hub("esm2_t6_8M_UR50D")
+
+
+def esm2_t12_35M_UR50D():
+    """12 layer ESM-2 model with 35M params, trained on UniRef50.
+
+    Returns a tuple of (Model, Alphabet).
+    """
+    return load_model_and_alphabet_hub("esm2_t12_35M_UR50D")
+
+
+def esm2_t30_150M_UR50D():
+    """30 layer ESM-2 model with 150M params, trained on UniRef50.
+
+    Returns a tuple of (Model, Alphabet).
+    """
+    return load_model_and_alphabet_hub("esm2_t30_150M_UR50D")
+
+
+def esm2_t33_650M_UR50D():
+    """33 layer ESM-2 model with 650M params, trained on UniRef50.
+
+    Returns a tuple of (Model, Alphabet).
+    """
+    return load_model_and_alphabet_hub("esm2_t33_650M_UR50D")
+
+
+def esm2_t36_3B_UR50D():
+    """36 layer ESM-2 model with 3B params, trained on UniRef50.
+
+    Returns a tuple of (Model, Alphabet).
+    """
+    return load_model_and_alphabet_hub("esm2_t36_3B_UR50D")
+
+
+def esm2_t48_15B_UR50D():
+    """48 layer ESM-2 model with 15B params, trained on UniRef50.
+    If you have OOM while loading this model, please refer to README
+    on how to employ FSDP and ZeRO CPU offloading
+
+    Returns a tuple of (Model, Alphabet).
+    """
+    return load_model_and_alphabet_hub("esm2_t48_15B_UR50D")
+
+
+def esmfold_v0():
+    """
+    ESMFold v0 model with 3B ESM-2, 48 folding blocks.
+    This version was used for the paper (Lin et al, 2022). It was trained 
+    on all PDB chains until 2020-05, to ensure temporal holdout with CASP14
+    and the CAMEO validation and test set reported there.
+    """
+    import esm.esmfold.v1.pretrained
+    return esm.esmfold.v1.pretrained.esmfold_v0()
+
+
+def esmfold_v1():
+    """
+    ESMFold v1 model using 3B ESM-2, 48 folding blocks.
+    ESMFold provides fast high accuracy atomic level structure prediction
+    directly from the individual sequence of a protein. ESMFold uses the ESM2
+    protein language model to extract meaningful representations from the
+    protein sequence.
+    """
+    import esm.esmfold.v1.pretrained
+    return esm.esmfold.v1.pretrained.esmfold_v1()

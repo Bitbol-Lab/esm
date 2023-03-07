@@ -136,7 +136,6 @@ try:
                 with torch.cuda.device(x.device):
                     return super().forward(x)
 
-
 except ImportError:
     from torch.nn import LayerNorm as ESM1bLayerNorm
 
@@ -151,11 +150,13 @@ class TransformerLayer(nn.Module):
         attention_heads,
         add_bias_kv=True,
         use_esm1b_layer_norm=False,
+        use_rotary_embeddings: bool = False,
     ):
         super().__init__()
         self.embed_dim = embed_dim
         self.ffn_embed_dim = ffn_embed_dim
         self.attention_heads = attention_heads
+        self.use_rotary_embeddings = use_rotary_embeddings
         self._init_submodules(add_bias_kv, use_esm1b_layer_norm)
 
     def _init_submodules(self, add_bias_kv, use_esm1b_layer_norm):
@@ -166,6 +167,7 @@ class TransformerLayer(nn.Module):
             self.attention_heads,
             add_bias_kv=add_bias_kv,
             add_zero_attn=False,
+            use_rotary_embeddings=self.use_rotary_embeddings,
         )
         self.self_attn_layer_norm = BertLayerNorm(self.embed_dim)
 
@@ -210,7 +212,7 @@ class AxialTransformerLayer(nn.Module):
         dropout: float = 0.1,
         attention_dropout: float = 0.1,
         activation_dropout: float = 0.1,
-        max_tokens_per_msa: int = 2 ** 14,
+        max_tokens_per_msa: int = 2**14,
     ) -> None:
         super().__init__()
 
@@ -414,7 +416,7 @@ class ContactPredictionHead(nn.Module):
 
         # features: B x C x T x T
         attentions = attentions.to(
-            next(self.parameters())
+            self.regression.weight.device
         )  # attentions always float32, may need to convert to float16
         attentions = apc(symmetrize(attentions))
         attentions = attentions.permute(0, 2, 3, 1)
@@ -462,7 +464,7 @@ class FeedForwardNetwork(nn.Module):
         embedding_dim: int,
         ffn_embedding_dim: int,
         activation_dropout: float = 0.1,
-        max_tokens_per_msa: int = 2 ** 14,
+        max_tokens_per_msa: int = 2**14,
     ):
         super().__init__()
         self.embedding_dim = embedding_dim
