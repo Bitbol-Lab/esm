@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..modules import (
+    EmbeddingMul,
     TransformerLayer,
     LearnedPositionalEmbedding,
     SinusoidalPositionalEmbedding,
@@ -68,6 +69,7 @@ class ProteinBertModel(nn.Module):
         self.embed_tokens = nn.Embedding(
             self.alphabet_size, self.args.embed_dim, padding_idx=self.padding_idx
         )
+        self.embed_tokens_oh = EmbeddingMul(self.alphabet_size, self.args.embed_dim)
         self.layers = nn.ModuleList(
             [
                 TransformerLayer(
@@ -113,14 +115,15 @@ class ProteinBertModel(nn.Module):
         if self.args.final_bias:
             self.embed_out_bias = nn.Parameter(torch.zeros(self.alphabet_size))
 
-    def forward(self, tokens, repr_layers=[], need_head_weights=False, return_contacts=False):
+    def forward(self, tokens_oh, repr_layers=[], need_head_weights=False, return_contacts=False):
         if return_contacts:
             need_head_weights = True
 
-        assert tokens.ndim == 2
+        assert tokens_oh.ndim == 4, "One-hot encodings required"
+        tokens = torch.argmax(tokens_oh, dim=-1)
         padding_mask = tokens.eq(self.padding_idx)  # B, T
 
-        x = self.embed_scale * self.embed_tokens(tokens)
+        x = self.embed_scale * self.embed_tokens_oh(tokens_oh)
 
         if getattr(self.args, "token_dropout", False):
             x.masked_fill_((tokens == self.mask_idx).unsqueeze(-1), 0.0)

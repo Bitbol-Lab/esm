@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 import esm
-from esm.modules import ContactPredictionHead, ESM1bLayerNorm, RobertaLMHead, TransformerLayer
+from esm.modules import EmbeddingMul, ContactPredictionHead, ESM1bLayerNorm, RobertaLMHead, TransformerLayer
 
 
 class ESM2(nn.Module):
@@ -45,6 +45,7 @@ class ESM2(nn.Module):
             self.embed_dim,
             padding_idx=self.padding_idx,
         )
+        self.embed_tokens_oh = EmbeddingMul(self.alphabet_size, self.embed_dim)
 
         self.layers = nn.ModuleList(
             [
@@ -74,14 +75,15 @@ class ESM2(nn.Module):
             weight=self.embed_tokens.weight,
         )
 
-    def forward(self, tokens, repr_layers=[], need_head_weights=False, return_contacts=False):
+    def forward(self, tokens_oh, repr_layers=[], need_head_weights=False, return_contacts=False):
         if return_contacts:
             need_head_weights = True
 
-        assert tokens.ndim == 2
+        assert tokens_oh.ndim == 4, "One-hot encodings required"
+        tokens = torch.argmax(tokens_oh, dim=-1)
         padding_mask = tokens.eq(self.padding_idx)  # B, T
 
-        x = self.embed_scale * self.embed_tokens(tokens)
+        x = self.embed_scale * self.embed_tokens_oh(tokens_oh)
 
         if self.token_dropout:
             x.masked_fill_((tokens == self.mask_idx).unsqueeze(-1), 0.0)

@@ -97,6 +97,7 @@ def _load_model_and_alphabet_core_v1(model_data):
         model_args = {pra(arg[0]): arg[1] for arg in vars(model_data["args"]).items()}
         model_state = {prs1(prs2(arg[0])): arg[1] for arg in model_data["model"].items()}
         model_state["embed_tokens.weight"][alphabet.mask_idx].zero_()  # For token drop
+        model_state["embed_tokens_oh.weight"] = model_state["embed_tokens.weight"]
         model_args["emb_layer_norm_before"] = has_emb_layer_norm_before(model_state)
         model_type = esm.ProteinBertModel
 
@@ -107,6 +108,7 @@ def _load_model_and_alphabet_core_v1(model_data):
         prs = lambda s: "".join(s.split("decoder.")[1:] if "decoder" in s else s)
         model_args = {pra(arg[0]): arg[1] for arg in vars(model_data["args"]).items()}
         model_state = {prs(arg[0]): arg[1] for arg in model_data["model"].items()}
+        model_state["embed_tokens_oh.weight"] = model_state["embed_tokens.weight"]
         model_type = esm.ProteinBertModel
     elif model_data["args"].arch == "msa_transformer":
 
@@ -172,6 +174,7 @@ def _load_model_and_alphabet_core_v2(model_data):
 
     cfg = model_data["cfg"]["model"]
     state_dict = model_data["model"]
+    state_dict["embed_tokens_oh.weight"] = state_dict["embed_tokens.weight"]
     state_dict = upgrade_state_dict(state_dict)
     alphabet = esm.data.Alphabet.from_architecture("ESM-1b")
     model = ESM2(
@@ -187,7 +190,7 @@ def _load_model_and_alphabet_core_v2(model_data):
 def load_model_and_alphabet_core(model_name, model_data, regression_data=None):
     if regression_data is not None:
         model_data["model"].update(regression_data["model"])
-
+    
     if model_name.startswith("esm2"):
         model, alphabet, model_state = _load_model_and_alphabet_core_v2(model_data)
     else:
